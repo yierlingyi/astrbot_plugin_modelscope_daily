@@ -1,0 +1,1 @@
+# 本插件只使用 AstrBot 已内置的 aiohttp / apscheduler，无需额外依赖。

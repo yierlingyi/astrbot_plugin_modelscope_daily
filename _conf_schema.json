@@ -1,0 +1,28 @@
+{
+  "cookie": {
+    "description": "魔搭 Cookie",
+    "hint": "填入登录 modelscope.cn 后浏览器里的整段 Cookie（需包含 m_session_id）。也可以直接填 https://modelscope.cn/my/myaccesstoken 生成的 ms- 开头访问令牌。保存后插件会自动重载。",
+    "type": "string",
+    "secret": true,
+    "obvious_hint": true,
+    "default": ""
+  },
+  "notify_umo": {
+    "description": "签到结果推送会话",
+    "hint": "点击右侧按钮选择接收签到结果的会话；留空则签到结果只写入 AstrBot 日志。",
+    "type": "string",
+    "default": "",
+    "_special": "umo"
+  },
+  "request_timeout": {
+    "description": "请求超时（秒）",
+    "hint": "请求魔搭接口的最长等待时间。",
+    "type": "int",
+    "default": 30,
+    "slider": {
+      "min": 5,
+      "max": 120,
+      "step": 1
+    }
+  }
+}

@@ -1,0 +1,8 @@
+name: astrbot_plugin_modelscope_daily
+desc: 魔搭社区（ModelScope）每日签到：每天 06:00 自动签到，并把结果推送到指定会话
+short_desc: 每天 06:00 自动签到魔搭社区，成功/失败都会推送
+version: 1.0.0
+author: yierlingyi
+display_name: 魔搭社区每日签到
+repo: https://github.com/yierlingyi/astrbot_plugin_modelscope_daily
+astrbot_version: ">=4.16.0"
