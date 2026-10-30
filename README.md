@@ -41,7 +41,7 @@ git clone https://github.com/yierlingyi/astrbot_plugin_modelscope_daily.git
 | 配置项 | 说明 |
 | --- | --- |
 | `cookie` | 魔搭 Cookie。填浏览器复制的**整段 Cookie**，插件会自动提取其中的 `m_session_id`。 |
-| `notify_umo` | 签到结果推送会话。点击配置项右侧按钮，直接从已有会话里选，不需要手抄会话 ID。 |
+| `notify_umo` | 签到结果推送会话。保存的是 AstrBot 的 **unified_msg_origin（UMO）**，不是裸 Session ID；点配置项右侧按钮从会话列表选择即可自动填入。手动填写格式为 `平台适配器ID:消息类型:会话ID`，如 `aiocqhttp:FriendMessage:123456789`（私聊）、`aiocqhttp:GroupMessage:987654321`（群聊）。不要只填 QQ 号或群号。 |
 | `request_timeout` | 请求魔搭接口的超时时间，默认 30 秒。 |
 
 > 第一次配置时，如果会话列表里找不到目标会话：先私聊机器人发一条消息（或在目标群里 @ 机器人一次），

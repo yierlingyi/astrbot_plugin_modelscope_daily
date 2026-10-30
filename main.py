@@ -25,7 +25,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.1"
 
 SITE = "https://www.modelscope.cn"
 LOGIN_INFO_PATH = "/api/v1/users/login/info"
