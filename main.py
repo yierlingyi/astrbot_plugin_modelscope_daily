@@ -1,7 +1,7 @@
 """魔搭社区（ModelScope）每日签到插件。
 
-每天北京时间 06:00 使用配置中的 Cookie 触发一次签到，并把结果主动推送到
-配置指定的会话。签到结果只有三种：未配置 Cookie、签到失败、签到成功。
+每天北京时间 06:00 依次为配置里的每个账号触发一次签到，并把汇总结果主动推送到
+配置指定的会话。整体结果只有三种：未配置账号、签到失败（有账号失败）、签到成功。
 
 签到原理：请求 ``/api/v1/users/login/info`` 本身会触发当日签到（重复调用幂等），
 随后通过 ``/openapi/v1/magicubes/transactions`` 查询当日到账记录确认是否成功。
@@ -20,12 +20,11 @@ from typing import Any
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
-PLUGIN_VERSION = "1.0.1"
+PLUGIN_VERSION = "1.1.0"
 
 SITE = "https://www.modelscope.cn"
 LOGIN_INFO_PATH = "/api/v1/users/login/info"
@@ -43,16 +42,12 @@ DAILY_RULE_KEYS = {"daily_active", "aliyun_bindlogin"}
 BEIJING = timezone(timedelta(hours=8), "Asia/Shanghai")
 CRON_HOUR = 6
 CRON_MINUTE = 0
+# 多账号之间稍作间隔，避免短时间内请求过于密集触发风控。
+ACCOUNTS_INTERVAL_SECONDS = 1.0
 
 STATUS_NO_COOKIE = "no_cookie"
 STATUS_FAILED = "failed"
 STATUS_SUCCESS = "success"
-
-RESULT_TITLES = {
-    STATUS_NO_COOKIE: "⚠️ 魔搭每日签到未执行",
-    STATUS_FAILED: "❌ 魔搭每日签到失败",
-    STATUS_SUCCESS: "✅ 魔搭每日签到成功",
-}
 
 
 def beijing_now() -> datetime:
@@ -264,6 +259,35 @@ def format_credit(value: float) -> str:
     return str(int(value)) if value.is_integer() else str(round(value, 2))
 
 
+def collect_accounts(config: dict[str, Any]) -> list[str]:
+    """收集配置里的所有账号 Cookie / 令牌，并去掉重复项。
+
+    Args:
+        config: 插件配置。
+
+    Returns:
+        按配置顺序排列的 Cookie / 令牌列表；没有配置时返回空列表。
+    """
+    raw = config.get("cookies")
+    candidates: list[str] = []
+    if isinstance(raw, list):
+        candidates.extend(str(item) for item in raw if isinstance(item, str))
+    # 兼容旧版单账号配置项。
+    legacy = config.get("cookie")
+    if isinstance(legacy, str):
+        candidates.append(legacy)
+
+    accounts: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        cookie = candidate.strip()
+        if not cookie or cookie in seen:
+            continue
+        seen.add(cookie)
+        accounts.append(cookie)
+    return accounts
+
+
 class ModelScopeDailyPlugin(Star):
     """魔搭社区每日签到插件。"""
 
@@ -334,7 +358,7 @@ class ModelScopeDailyPlugin(Star):
             result = {
                 "status": STATUS_FAILED,
                 "text": self._build_message(
-                    STATUS_FAILED,
+                    "❌ 魔搭每日签到失败",
                     ["原因：插件内部错误，请查看 AstrBot 日志。"],
                 ),
             }
@@ -405,30 +429,22 @@ class ModelScopeDailyPlugin(Star):
             payload = {}
         return status, payload, body[:200].replace("\n", " ")
 
-    async def _run_check_in(self) -> dict[str, str]:
-        """执行一次签到，返回状态与用于推送的文案。
+    async def _check_account(self, cookie_text: str) -> dict[str, str]:
+        """为单个账号执行一次签到。
+
+        Args:
+            cookie_text: 该账号的整段 Cookie 或 ms- 令牌。
 
         Returns:
-            ``{"status": "no_cookie" | "failed" | "success", "text": "..."}``。
+            ``{"status": ..., "summary": ..., "display": ...}``。
+            summary 是一行可直接放进推送文案的明细，display 是魔搭昵称。
         """
-        cookie_text = str(self.config.get("cookie") or "").strip()
-        if not cookie_text:
-            return {
-                "status": STATUS_NO_COOKIE,
-                "text": self._build_message(
-                    STATUS_NO_COOKIE,
-                    ["原因：尚未在插件配置中填写 Cookie。"],
-                ),
-            }
-
         session_id = extract_session_id(cookie_text)
         if not session_id:
             return {
                 "status": STATUS_FAILED,
-                "text": self._build_message(
-                    STATUS_FAILED,
-                    ["原因：Cookie 中未找到 m_session_id，请重新复制完整 Cookie。"],
-                ),
+                "summary": "Cookie 中未找到 m_session_id，请重新复制完整 Cookie。",
+                "display": "",
             }
         cookie_header = build_cookie_header(cookie_text, session_id)
 
@@ -461,10 +477,8 @@ class ModelScopeDailyPlugin(Star):
         except Exception as exc:
             return {
                 "status": STATUS_FAILED,
-                "text": self._build_message(
-                    STATUS_FAILED,
-                    [f"原因：请求魔搭登录接口失败：{exc}"],
-                ),
+                "summary": f"请求魔搭登录接口失败：{exc}",
+                "display": "",
             }
 
         identity = envelope_data(payload)
@@ -504,7 +518,8 @@ class ModelScopeDailyPlugin(Star):
         if reason:
             return {
                 "status": STATUS_FAILED,
-                "text": self._build_message(STATUS_FAILED, [f"原因：{reason}"]),
+                "summary": reason,
+                "display": display,
             }
 
         # 2. 查询当日魔粒账单，确认签到是否真的到账。到账可能有延迟，最多查 3 次。
@@ -569,7 +584,8 @@ class ModelScopeDailyPlugin(Star):
                 reason = f"未能确认今日签到到账：{verify_error}"
             return {
                 "status": STATUS_FAILED,
-                "text": self._build_message(STATUS_FAILED, [f"原因：{reason}"]),
+                "summary": reason,
+                "display": display,
             }
 
         credit = record_credit(records)
@@ -596,41 +612,98 @@ class ModelScopeDailyPlugin(Star):
         except Exception as exc:
             logger.warning("查询魔搭魔粒余额失败：%s", exc)
 
-        lines: list[str] = []
-        if display:
-            lines.append(f"用户：{display}")
+        parts: list[str] = []
         title_text = f"（{' + '.join(titles)}）" if titles else ""
         if before_records is None:
             # 签到前的账单没查到，无法判断是不是重复签到，只报告今日合计。
-            lines.append(f"今日到账：+{format_credit(credit)} 魔粒{title_text}")
+            parts.append(f"今日到账 +{format_credit(credit)} 魔粒{title_text}")
         elif not before_records:
-            lines.append(f"本次到账：+{format_credit(credit)} 魔粒{title_text}")
+            parts.append(f"本次到账 +{format_credit(credit)} 魔粒{title_text}")
         elif credit > before_credit:
             gained = credit - before_credit
-            lines.append(f"本次到账：+{format_credit(gained)} 魔粒{title_text}")
-            lines.append(f"今日合计：+{format_credit(credit)} 魔粒")
+            parts.append(f"本次到账 +{format_credit(gained)} 魔粒{title_text}")
+            parts.append(f"今日合计 +{format_credit(credit)} 魔粒")
         else:
-            lines.append("今天已签到过，本次无新增到账。")
-            lines.append(f"今日合计：+{format_credit(credit)} 魔粒{title_text}")
+            parts.append("今天已签到过，本次无新增到账")
+            parts.append(f"今日合计 +{format_credit(credit)} 魔粒{title_text}")
         if available is not None:
-            balance_line = f"当前余额：{available} 魔粒"
+            balance_text = f"当前余额 {available} 魔粒"
             if total is not None:
-                balance_line += f"（总计 {total}）"
-            lines.append(balance_line)
+                balance_text += f"（总计 {total}）"
+            parts.append(balance_text)
         return {
             "status": STATUS_SUCCESS,
-            "text": self._build_message(STATUS_SUCCESS, lines),
+            "summary": "；".join(parts),
+            "display": display,
         }
 
-    def _build_message(self, status: str, lines: list[str]) -> str:
+    async def _run_check_in(self) -> dict[str, str]:
+        """为所有配置账号依次签到，返回总体状态与推送文案。
+
+        Returns:
+            ``{"status": "no_cookie" | "failed" | "success", "text": "..."}``。
+        """
+        accounts = collect_accounts(self.config)
+        if not accounts:
+            return {
+                "status": STATUS_NO_COOKIE,
+                "text": self._build_message(
+                    "⚠️ 魔搭每日签到未执行",
+                    [
+                        "原因：尚未在插件配置中填写 Cookie，"
+                        "请在「魔搭账号列表」里添加账号。"
+                    ],
+                ),
+            }
+
+        total = len(accounts)
+        results: list[dict[str, str]] = []
+        for index, cookie_text in enumerate(accounts):
+            if index:
+                # 多账号之间稍作间隔，避免短时间内请求过于密集触发风控。
+                await asyncio.sleep(ACCOUNTS_INTERVAL_SECONDS)
+            try:
+                result = await self._check_account(cookie_text)
+            except Exception as exc:
+                logger.exception("第 %s 个账号签到出错。", index + 1)
+                result = {
+                    "status": STATUS_FAILED,
+                    "summary": f"插件内部错误：{exc}",
+                    "display": "",
+                }
+            label = result.get("display") or f"账号{index + 1}"
+            results.append({"label": label, **result})
+            logger.info(
+                "账号 %s 签到结果：%s（%s）",
+                label,
+                result["status"],
+                result["summary"],
+            )
+
+        ok_count = sum(1 for item in results if item["status"] == STATUS_SUCCESS)
+        failed_count = total - ok_count
+        lines = [
+            f"{'✅' if item['status'] == STATUS_SUCCESS else '❌'} "
+            f"{item['label']}：{item['summary']}"
+            for item in results
+        ]
+        if failed_count == 0:
+            status = STATUS_SUCCESS
+            title = f"✅ 魔搭每日签到成功（{total} 个账号）"
+        else:
+            status = STATUS_FAILED
+            title = f"❌ 魔搭每日签到失败（{failed_count}/{total} 个账号失败）"
+        return {"status": status, "text": self._build_message(title, lines)}
+
+    def _build_message(self, title: str, lines: list[str]) -> str:
         """拼接签到结果文案。
 
         Args:
-            status: 签到结果状态。
+            title: 结果标题行。
             lines: 结果明细行。
 
         Returns:
             完整的推送文本。
         """
         now = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
-        return "\n".join([RESULT_TITLES[status], f"时间：{now}（北京时间）", *lines])
+        return "\n".join([title, f"时间：{now}（北京时间）", *lines])

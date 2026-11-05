@@ -1,10 +1,17 @@
 {
-  "cookie": {
-    "description": "魔搭 Cookie",
-    "hint": "填入登录 modelscope.cn 后浏览器里的整段 Cookie（需包含 m_session_id）。也可以直接填 https://modelscope.cn/my/myaccesstoken 生成的 ms- 开头访问令牌。保存后插件会自动重载。",
-    "type": "string",
+  "cookies": {
+    "description": "魔搭账号 Cookie / 令牌列表（支持多账号）",
+    "hint": "每个账号一条：填整段 Cookie 或 https://modelscope.cn/my/myaccesstoken 生成的 ms- 开头访问令牌。每天 06:00 会按顺序依次签到，全部结果汇总后推送。留空则使用下方「旧版单账号 Cookie」。",
+    "type": "list",
     "secret": true,
     "obvious_hint": true,
+    "default": []
+  },
+  "cookie": {
+    "description": "旧版单账号 Cookie（可选，兼容用）",
+    "hint": "早期版本的单项配置。如果这里填了值，会和上面的账号列表一起签到；新配置建议只填上面的账号列表。",
+    "type": "string",
+    "secret": true,
     "default": ""
   },
   "notify_umo": {
