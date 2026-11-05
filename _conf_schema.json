@@ -16,7 +16,7 @@
   },
   "notify_umo": {
     "description": "签到结果推送会话（填 unified_msg_origin，不是裸 Session ID）",
-    "hint": "这里保存的是 AstrBot 的 unified_msg_origin（UMO），格式为「平台适配器ID:消息类型:会话ID」，例如私聊 aiocqhttp:FriendMessage:123456789、群聊 aiocqhttp:GroupMessage:987654321。推荐直接点右侧按钮从会话列表选择，会自动填入完整 UMO；手动填写时不要只填 QQ 号或群号。留空则签到结果只写入 AstrBot 日志。",
+    "hint": "这里保存的是 AstrBot 的 unified_msg_origin（UMO），格式为「平台适配器ID:消息类型:会话ID」，例如私聊 aiocqhttp:FriendMessage:123456789、群聊 aiocqhttp:GroupMessage:987654321。推荐直接点右侧按钮从会话列表选择，会自动填入完整 UMO。只填 QQ 号/群号也可以（仅有一个平台时会自动按私聊、群聊依次补全），但多平台时无法判断，必须填完整 UMO。留空则签到结果只写入 AstrBot 日志。",
     "type": "string",
     "default": "",
     "_special": "umo"

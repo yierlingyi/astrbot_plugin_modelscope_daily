@@ -53,12 +53,15 @@ git clone https://github.com/yierlingyi/astrbot_plugin_modelscope_daily.git
 | --- | --- |
 | `cookies` | **魔搭账号列表（支持多账号）**。每个账号一条，填浏览器复制的整段 Cookie，或 `ms-` 开头的访问令牌。每日 06:00 按顺序依次签到。 |
 | `cookie` | 旧版单账号 Cookie（可选，兼容用）。填了会和上面的账号列表一起签到；新配置建议只填 `cookies`。 |
-| `notify_umo` | 签到结果推送会话。保存的是 AstrBot 的 **unified_msg_origin（UMO）**，不是裸 Session ID；点配置项右侧按钮从会话列表选择即可自动填入。手动填写格式为 `平台适配器ID:消息类型:会话ID`，如 `aiocqhttp:FriendMessage:123456789`（私聊）、`aiocqhttp:GroupMessage:987654321`（群聊）。不要只填 QQ 号或群号。 |
+| `notify_umo` | 签到结果推送会话。保存的是 AstrBot 的 **unified_msg_origin（UMO）**，不是裸 Session ID；点配置项右侧按钮从会话列表选择即可自动填入。手动填写格式为 `平台适配器ID:消息类型:会话ID`，如 `aiocqhttp:FriendMessage:123456789`（私聊）、`aiocqhttp:GroupMessage:987654321`（群聊）。只填 QQ 号/群号也能用（仅有一个平台时会按「私聊 → 群聊」依次尝试自动补全），但多平台时必须填完整 UMO。 |
 | `request_timeout` | 请求魔搭接口的超时时间，默认 30 秒。 |
 
 > 第一次配置时，如果会话列表里找不到目标会话：先私聊机器人发一条消息（或在目标群里 @ 机器人一次），
 > 让 AstrBot 记录下这个会话，再回到插件配置里选择；也可以展开输入框手动填写 UMO，
 > 格式如 `aiocqhttp:FriendMessage:123456789`。
+>
+> v1.1.1 起，如果 `notify_umo` 只填了号码，插件会在推送时自动补成
+> `平台ID:FriendMessage:号码` 与 `平台ID:GroupMessage:号码` 依次尝试；补全或失败的原因都会写进日志。
 
 ### 如何获取 Cookie / 令牌
 

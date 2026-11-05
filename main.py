@@ -24,7 +24,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.1.1"
 
 SITE = "https://www.modelscope.cn"
 LOGIN_INFO_PATH = "/api/v1/users/login/info"
@@ -288,6 +288,50 @@ def collect_accounts(config: dict[str, Any]) -> list[str]:
     return accounts
 
 
+def build_umo_candidates(raw: str, platform_ids: list[str]) -> tuple[list[str], str]:
+    """把配置里的推送目标整理成候选 UMO 列表。
+
+    完整 UMO 形如 ``aiocqhttp:FriendMessage:123456789``。如果用户只填了号码，
+    在只有一个平台时按「私聊 → 群聊」补全，尽量让推送能送达。
+
+    Args:
+        raw: 配置里的 ``notify_umo`` 原始值。
+        platform_ids: 当前已加载的平台适配器 ID 列表。
+
+    Returns:
+        (候选 UMO 列表, 说明)。列表为空表示无法解析，说明里给出原因。
+    """
+    value = (raw or "").strip()
+    if not value:
+        return [], "未配置推送会话"
+
+    parts = value.split(":")
+    if len(parts) == 3 and all(part.strip() for part in parts):
+        if platform_ids and parts[0] not in platform_ids:
+            available = "、".join(platform_ids)
+            return [value], f"平台「{parts[0]}」当前未加载，可用平台：{available}"
+        return [value], ""
+
+    if value.isdigit():
+        if len(platform_ids) == 1:
+            platform_id = platform_ids[0]
+            return (
+                [
+                    f"{platform_id}:FriendMessage:{value}",
+                    f"{platform_id}:GroupMessage:{value}",
+                ],
+                "只填了号码，已按私聊、群聊依次尝试补全 UMO",
+            )
+        if not platform_ids:
+            return [], "当前没有已加载的平台，无法补全会话"
+        return (
+            [],
+            f"有多个平台（{'、'.join(platform_ids)}），无法自动判断，请填完整 UMO",
+        )
+
+    return [], "格式不正确，需要「平台适配器ID:消息类型:会话ID」"
+
+
 class ModelScopeDailyPlugin(Star):
     """魔搭社区每日签到插件。"""
 
@@ -303,6 +347,19 @@ class ModelScopeDailyPlugin(Star):
     async def initialize(self) -> None:
         """启动每天北京时间 06:00 的签到任务。"""
         self._shutdown_scheduler()
+        notify_raw = str(self.config.get("notify_umo") or "").strip()
+        if notify_raw:
+            candidates, note = build_umo_candidates(notify_raw, self._platform_ids())
+            if not candidates:
+                logger.error(
+                    "notify_umo=%r 不可用：%s。签到结果将只写入日志。",
+                    notify_raw,
+                    note,
+                )
+            elif note:
+                logger.info("notify_umo=%r %s。", notify_raw, note)
+        else:
+            logger.warning("未配置 notify_umo，签到结果只会写入日志。")
         try:
             scheduler = AsyncIOScheduler(timezone=BEIJING)
             scheduler.add_job(
@@ -374,18 +431,59 @@ class ModelScopeDailyPlugin(Star):
         Returns:
             是否推送成功；没有配置推送会话时返回 False。
         """
-        umo = str(self.config.get("notify_umo") or "").strip()
-        if not umo:
-            logger.warning("未配置 notify_umo，签到结果只写入日志。")
+        raw = str(self.config.get("notify_umo") or "").strip()
+        candidates, note = build_umo_candidates(raw, self._platform_ids())
+        if not candidates:
+            logger.error(
+                "推送签到结果失败：notify_umo=%r 不可用（%s）。请在插件配置里点"
+                "右侧按钮选择会话，或填完整 UMO，例如 "
+                "aiocqhttp:FriendMessage:123456789。",
+                raw,
+                note,
+            )
             return False
-        try:
-            sent = await self.context.send_message(umo, MessageChain().message(text))
-        except Exception as exc:
-            logger.error("推送签到结果到 %s 失败：%s", umo, exc)
-            return False
-        if not sent:
-            logger.error("推送签到结果失败：找不到会话 %s 对应的平台。", umo)
-        return sent
+        if note:
+            logger.warning(
+                "notify_umo=%r %s：%s",
+                raw,
+                note,
+                "、".join(candidates),
+            )
+        for umo in candidates:
+            try:
+                sent = await self.context.send_message(
+                    umo,
+                    MessageChain().message(text),
+                )
+            except Exception as exc:
+                logger.warning("推送签到结果到 %s 失败：%s", umo, exc)
+                continue
+            if sent:
+                if umo != raw:
+                    logger.info("签到结果已推送到 %s。", umo)
+                return True
+            logger.warning("推送签到结果失败：找不到会话 %s 对应的平台。", umo)
+        logger.error(
+            "推送签到结果失败：候选会话全部不可用（notify_umo=%r）。",
+            raw,
+        )
+        return False
+
+    def _platform_ids(self) -> list[str]:
+        """返回当前已加载的平台适配器 ID 列表。"""
+        manager = getattr(self.context, "platform_manager", None)
+        insts = getattr(manager, "platform_insts", None)
+        ids: list[str] = []
+        if not isinstance(insts, (list, tuple)):
+            return ids
+        for platform in insts:
+            try:
+                platform_id = str(getattr(platform.meta(), "id", "") or "")
+            except Exception:
+                continue
+            if platform_id and platform_id not in ids:
+                ids.append(platform_id)
+        return ids
 
     async def _get_json(
         self,
